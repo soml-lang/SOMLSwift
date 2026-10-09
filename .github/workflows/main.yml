@@ -1,0 +1,16 @@
+name: CI
+on:
+  - push
+  - pull_request
+jobs:
+  test-macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - run: swift test
+  test-linux:
+    runs-on: ubuntu-latest
+    container: swift:6.4
+    steps:
+      - uses: actions/checkout@v7
+      - run: swift test
