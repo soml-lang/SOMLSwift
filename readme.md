@@ -31,7 +31,7 @@ Swift 6.3+, macOS 15+, iOS 18+, tvOS 18+, watchOS 11+, visionOS 2+, Linux
 Add the following to `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/soml-lang/SOMLSwift", from: "0.0.1")
+.package(url: "https://github.com/soml-lang/SOMLSwift", from: "0.0.2")
 ```
 
 Or add `https://github.com/soml-lang/SOMLSwift` in the [“Swift Package Manager” tab in Xcode](https://developer.apple.com/documentation/xcode/adding_package_dependencies_to_your_app).
