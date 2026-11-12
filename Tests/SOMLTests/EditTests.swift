@@ -1598,9 +1598,9 @@ struct DecodingErrorLocationTests {
 
 	@Test(arguments: [
 		("name: 'a'\ntags: []", "No member with the key port (line 1, column 1)"),
-		("name: 'a'\nport: null\ntags: []", "Expected an int for Int, but found null (line 2, column 1)"),
-		("name: 'a'\nport: 'x'\ntags: []", "Expected an int for Int, but found the string 'x' (line 2, column 1)"),
-		("name: 'a'\nport: 1\ntags: [1]", "Expected a string for String, but found the int 1 (line 3, column 8)"),
+		("name: 'a'\nport: null\ntags: []", "Expected an int, but found null (line 2, column 1)"),
+		("name: 'a'\nport: 'x'\ntags: []", "Expected an int, but found the string 'x' (line 2, column 1)"),
+		("name: 'a'\nport: 1\ntags: [1]", "Expected a string, but found the int 1 (line 3, column 8)"),
 		("name: 'a'\nport: 1\ntags: []\nextra: 1", "Unknown key extra, which Strict does not read (line 4, column 1)"),
 	])
 	func `every kind of decoding error says where its value is`(_ text: String, _ expected: String) throws {

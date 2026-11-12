@@ -177,7 +177,13 @@ extension SOML {
 						}
 					}
 
-					throw SOML.ParseError(message: error.message, offset: position + error.location.offset, in: bytes, fixIt: error.fixIt?.shifted(by: position))
+					throw SOML.ParseError(
+						message: error.message,
+						offset: position + error.location.offset,
+						in: bytes,
+						fixIt: error.fixIt?.shifted(by: position),
+						kind: error.kind
+					)
 				}
 
 				position = end

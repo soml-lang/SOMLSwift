@@ -135,6 +135,36 @@ extension SOML.Document {
 	}
 
 	/**
+	Where a member's key is written, including its quotes and escapes. Returns `nil` for missing paths and array items, which have no key.
+
+	An editor can use the exact source spelling for key selection and rename preparation, without lexing the key again.
+	*/
+	public func keyRange(of path: SOML.KeyPath) -> Range<SOML.Location>? {
+		guard let range = node(at: path)?.keyRange else {
+			return nil
+		}
+		return location(of: range)
+	}
+
+	/**
+	Whether a byte offset is an empty value position where an editor can offer literals or snippets. The document may be incomplete, but the prefix must follow the document grammar up to a value, outside strings and comments, and no existing value may follow the caret.
+
+	Only empty positions are recognized. Partial tokens and uncertain contexts return `false`, as do invalid UTF-8 and offsets outside the bytes. No document text is changed.
+	*/
+	public static func expectsValue(atOffset offset: Int, in bytes: [UInt8]) -> Bool {
+		Parser.expectsValue(atOffset: offset, in: bytes)
+	}
+
+	/**
+	Whether a byte offset is a blank member position where an editor can offer keys. The prefix must follow the document grammar up to a key, outside strings, comments, values, and existing keys. Only whitespace and comments may follow the caret before the closing object or the end of the text.
+
+	The document may be incomplete. Invalid UTF-8 and offsets outside the bytes return `false`. No document text is changed.
+	*/
+	public static func expectsKey(atOffset offset: Int, in bytes: [UInt8]) -> Bool {
+		Parser.expectsKey(atOffset: offset, in: bytes)
+	}
+
+	/**
 	Where the value at a key path is written, without the key of a member. It is `nil` when nothing is at the path.
 
 	It is the text that a person wrote for the value, so a tool can show it as written, like `0x1F90` for the int 8080. A block string runs from its opening delimiter to its closing one, and an object or an array from its opening bracket to its closing one.
@@ -221,9 +251,10 @@ extension SOML.Document {
 	/**
 	The member or item at a key path: the bytes of the member or the item, and its value.
 	*/
-	private func node(at path: SOML.KeyPath) -> (range: Range<Int>, value: SyntaxTree.Node)? {
+	private func node(at path: SOML.KeyPath) -> (range: Range<Int>, value: SyntaxTree.Node, keyRange: Range<Int>?)? {
 		var node = tree.body
 		var range = node.range
+		var keyRange: Range<Int>?
 		var value = self.value
 
 		// The value and syntax tree have the same source order. Reuse the object's key index instead of scanning its members for every lookup.
@@ -236,6 +267,7 @@ extension SOML.Document {
 
 				let member = members[index]
 				range = member.range
+				keyRange = member.keyRange
 				node = member.value
 				value = object[index].value
 			case (.array(let items), .array(let values), .index(let index)):
@@ -245,13 +277,14 @@ extension SOML.Document {
 
 				node = items[index]
 				range = node.range
+				keyRange = nil
 				value = values[index]
 			default:
 				return nil
 			}
 		}
 
-		return (range, node)
+		return (range, node, keyRange)
 	}
 
 	private func location(of range: Range<Int>) -> Range<SOML.Location> {

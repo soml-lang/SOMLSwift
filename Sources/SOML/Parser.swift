@@ -39,18 +39,42 @@ extension SOML {
 		public let fixIt: FixIt?
 
 		/**
+		What kind of problem it is, for code that handles some problems in its own way, so it does not depend on the text of the message. Most problems are `.other`. See `SOML.ParseError.Kind`.
+		*/
+		public let kind: Kind
+
+		/**
+		The UTF-8 bytes associated with the problem in the parsed text, when known. A scalar or duplicate key token has its complete range; a malformed string can have only its consumed prefix. An empty range marks the end of the input. The diagnostic location remains the position of the original error.
+		*/
+		public let sourceRange: Range<Int>?
+
+		/**
 		The error for a problem at a byte offset in a document.
 		*/
-		init(message: String, offset: Int, in bytes: [UInt8], fixIt: FixIt? = nil) {
+		init(
+			message: String,
+			offset: Int,
+			in bytes: [UInt8],
+			fixIt: FixIt? = nil,
+			kind: Kind = .other,
+			sourceRange: Range<Int>? = nil
+		) {
 			// The message can quote the document, so it is cleaned as the code frame is.
-			self.init(message: message.sanitizedForTerminal, location: SOML.Location(offset: offset, in: bytes), in: bytes, fixIt: fixIt)
+			self.init(message: message.sanitizedForTerminal, location: SOML.Location(offset: offset, in: bytes), in: bytes, fixIt: fixIt, kind: kind, sourceRange: sourceRange)
 		}
 
 		/**
 		The error for a problem at a location in a document that is already known, so the lines before it are not counted again.
 		*/
-		init(message: String, location: SOML.Location, in bytes: [UInt8], fixIt: FixIt? = nil) {
-			self.init(message: message, location: location, in: bytes, fixIt: fixIt) { offset in
+		init(
+			message: String,
+			location: SOML.Location,
+			in bytes: [UInt8],
+			fixIt: FixIt? = nil,
+			kind: Kind = .other,
+			sourceRange: Range<Int>? = nil
+		) {
+			self.init(message: message, location: location, in: bytes, fixIt: fixIt, kind: kind, sourceRange: sourceRange) { offset in
 				bytes[..<offset].lastIndex(of: .lineFeed).map { $0 + 1 } ?? 0
 			}
 		}
@@ -63,12 +87,16 @@ extension SOML {
 			location: SOML.Location,
 			in bytes: [UInt8],
 			fixIt: FixIt? = nil,
+			kind: Kind = .other,
+			sourceRange: Range<Int>? = nil,
 			lineStart: (Int) -> Int
 		) {
 			self.message = message
 			self.location = location
 			self.codeFrame = Self.codeFrame(of: bytes, offset: location.offset, line: location.line, lineStart: lineStart)
 			self.fixIt = fixIt
+			self.kind = kind
+			self.sourceRange = sourceRange
 		}
 
 		/**
@@ -82,9 +110,86 @@ extension SOML {
 
 extension SOML.ParseError {
 	/**
+	What kind of problem a parse error is, for code that handles some problems in its own way, like an editor that shows where the first of two duplicate keys is. The message can change in a new version, but the kind of a problem does not.
+
+	```swift
+	do {
+		_ = try SOML.Value(parsing: "a: 1\na: 2")
+	} catch {
+		if case .duplicateKey(let key) = error.kind {
+			print(key)
+			//=> a
+		}
+	}
+	```
+	*/
+	public enum Kind: Sendable, Hashable {
+		/**
+		A key that the object already has, like the second `a` in `a: 1` and `a: 2`. The key is as the document means it, without quotes or escapes.
+		*/
+		case duplicateKey(String)
+
+		/**
+		A character directly after a complete value, like the `s` in `name: 'Sindre's app'`, where the apostrophe ends the string.
+		*/
+		case unexpectedCharacterAfterValue
+
+		/**
+		An unrecognized symbol or the end of the text where the grammar expects a value.
+		*/
+		case expectedValue
+
+		/**
+		An unrecognized symbol or the end of the text where the grammar expects a key.
+		*/
+		case expectedKey
+
+		/**
+		A numeric scalar that does not follow the number syntax or supported range.
+		*/
+		case invalidNumber
+
+		/**
+		A calendar date with invalid syntax or components.
+		*/
+		case invalidDate
+
+		/**
+		An instant with invalid syntax or components.
+		*/
+		case invalidInstant
+
+		/**
+		A duration with invalid syntax or an unrepresentable value.
+		*/
+		case invalidDuration
+
+		/**
+		A quoted string with invalid syntax.
+		*/
+		case invalidString
+
+		/**
+		Any other problem.
+		*/
+		case other
+	}
+}
+
+extension SOML.ParseError {
+	/**
+	Adds the scalar context known by the parser without replacing a more specific error kind or its original position and fix-it.
+	*/
+	fileprivate func annotating(kind: Kind, sourceRange: Range<Int>, in bytes: [UInt8]) -> Self {
+		Self(message: message, location: location, in: bytes, fixIt: fixIt, kind: self.kind == .other ? kind : self.kind, sourceRange: self.sourceRange ?? sourceRange)
+	}
+}
+
+extension SOML.ParseError {
+	/**
 	A change to the text that fixes a parse error: the bytes to replace, and the text to put there.
 
-	A fix-it is only given when the problem is a spelling with exactly one fix that keeps the meaning: the case of a letter, as in `0xff` → `0xFF`, `1E10` → `1e10`, `True` → `true`, or `\u{E9}` → `\u{e9}`, or the leading zeros of an escape, as in `\u{00e9}` → `\u{e9}`. So a tool, like an editor that formats while the user types, can apply it without asking. A spelling that is more likely part of a word or a string, like `0Bad`, `1Hz`, `True story`, or `yes`, gets no fix-it.
+	A fix-it is only given when the problem is a spelling with exactly one fix that keeps the meaning: the case of a letter, as in `0xff` → `0xFF`, `1E10` → `1e10`, `True` → `true`, or `\u{E9}` → `\u{e9}`, or the leading zeros of an escape, as in `\u{00e9}` → `\u{e9}`. A complete JSON Unicode escape also gets its native spelling, as in `\u00e9` → `\u{e9}` or `\uD83D\uDE00` → `\u{1f600}`, when it represents a permitted Unicode scalar. So a tool, like an editor that formats while the user types, can apply it without asking. A spelling that is more likely part of a word or a string, like `0Bad`, `1Hz`, `True story`, or `yes`, gets no fix-it.
 
 	A fix-it fixes only the problem that its error reports, so the fixed text can still have others, even in the same value, like the missing digits of `1E`. A parse reports only the first problem, so parse the fixed text again to find the next one.
 
@@ -370,6 +475,76 @@ struct Parser {
 	*/
 	static func parseDocument(_ bytes: [UInt8]) throws(SOML.ParseError) -> SOML.Value {
 		try parse(bytes, textKind: .document) { try $0.parseDocument() }
+	}
+
+	/**
+	Probes an empty value position with the ordinary document grammar. An invalid marker is recognized only where a value belongs, rather than inside a string, comment, key, or existing token.
+	*/
+	static func expectsValue(atOffset offset: Int, in bytes: [UInt8]) -> Bool {
+		guard offset >= 0, offset <= bytes.count else {
+			return false
+		}
+
+		var suffix = Parser(bytes: bytes)
+		suffix.position = offset
+		do {
+			try suffix.checkEncoding(checksByteOrderMark: true)
+			try suffix.skipWhitespace(acrossLines: true)
+		} catch {
+			return false
+		}
+		if
+			suffix.position != bytes.count,
+			suffix.byte(at: suffix.position) != .comma,
+			suffix.byte(at: suffix.position) != .closeBracket,
+			suffix.byte(at: suffix.position) != .closeBrace
+		{
+			// A later member can follow a value hole across a line break. Filling the hole proves that no existing value or token would be displaced.
+			guard bytes[offset..<suffix.position].contains(.lineFeed) else {
+				return false
+			}
+			var filled = bytes
+			filled.insert(contentsOf: "null".utf8, at: offset)
+			guard (try? parseDocument(filled)) != nil else {
+				return false
+			}
+		}
+
+		// A marker cannot be a valid value. The typed error and its exact offset distinguish a value hole from all other failures, including a marker skipped inside a comment.
+		let probe = Array(bytes[..<offset]) + [UInt8(ascii: "?")]
+		do {
+			_ = try parseDocument(probe)
+			return false
+		} catch {
+			return error.kind == .expectedValue && error.location.offset == offset
+		}
+	}
+
+	/**
+	Probes a blank member position with the ordinary document grammar. A key marker cannot be mistaken for a value, comment, string, or existing key.
+	*/
+	static func expectsKey(atOffset offset: Int, in bytes: [UInt8]) -> Bool {
+		guard offset >= 0, offset <= bytes.count else {
+			return false
+		}
+		var suffix = Parser(bytes: bytes)
+		suffix.position = offset
+		do {
+			try suffix.checkEncoding(checksByteOrderMark: true)
+			try suffix.skipWhitespace(acrossLines: true)
+		} catch {
+			return false
+		}
+		guard suffix.position == bytes.count || suffix.byte(at: suffix.position) == .closeBrace else {
+			return false
+		}
+		let probe = Array(bytes[..<offset]) + [UInt8(ascii: "?")]
+		do {
+			_ = try parseDocument(probe)
+			return false
+		} catch {
+			return error.kind == .expectedKey && error.location.offset == offset
+		}
 	}
 
 	/**
@@ -787,6 +962,7 @@ struct Parser {
 	private mutating func parseMember(into members: inout OrderedMembers<SOML.Value>) throws {
 		let keyStart = position
 		let key = try parseKey()
+		let keyEnd = position
 
 		if byte(at: position) == .dot {
 			throw dotInKey(keyStart: keyStart)
@@ -810,7 +986,7 @@ struct Parser {
 		}
 
 		guard members.position(of: key) == nil else {
-			throw error("Duplicate key \(Self.describeKey(key))", at: keyStart)
+			throw error("Duplicate key \(Self.describeKey(key))", at: keyStart, kind: .duplicateKey(key), sourceRange: keyStart..<keyEnd)
 		}
 
 		members.append(value, forKey: key)
@@ -865,7 +1041,7 @@ struct Parser {
 			return
 		}
 
-		throw error("\(valueError.message)\(commentNote)", at: valueStart)
+		throw error("\(valueError.message)\(commentNote)", at: valueStart, kind: valueError.kind)
 	}
 
 	/**
@@ -1207,10 +1383,10 @@ struct Parser {
 		let expectation = isAfterDot ? "Expected a key after “.”" : "Expected a key"
 
 		guard position < bytes.count else {
-			return error(expectation, at: position)
+			return error(expectation, at: position, kind: .expectedKey)
 		}
 
-		return error("\(expectation), but found \(describeCharacter(at: position))\(keyQuotingHint())\(slashCommentHint(at: position))", at: position)
+		return error("\(expectation), but found \(describeCharacter(at: position))\(keyQuotingHint())\(slashCommentHint(at: position))", at: position, kind: .expectedKey)
 	}
 
 	// MARK: Values
@@ -1332,7 +1508,7 @@ struct Parser {
 	*/
 	private func unexpectedValue() -> SOML.ParseError {
 		guard let first = byte(at: position) else {
-			return error("Expected a value, but reached \(textKind.end)", at: position)
+			return error("Expected a value, but reached \(textKind.end)", at: position, kind: .expectedValue)
 		}
 
 		if first == .plus {
@@ -1348,7 +1524,7 @@ struct Parser {
 
 		guard wordEnd > position else {
 			let hint = isBlockScalarIndicator(at: position) ? ". Write a multiline string as a block string, between ''' lines" : slashCommentHint(at: position)
-			return error("Expected a value, but found \(describeCharacter(at: position))\(hint)", at: position)
+			return error("Expected a value, but found \(describeCharacter(at: position))\(hint)", at: position, kind: .expectedValue)
 		}
 
 		let word = makeString(position..<min(wordEnd, position + 41))
@@ -1422,7 +1598,7 @@ struct Parser {
 			return error("There is no '' escape in a '...' string. Write a string that contains ' as \"...\", as in \"it's\"", at: position)
 		}
 
-		return error("Unexpected \(describeCharacter(at: position)) after a value", at: position)
+		return error("Unexpected \(describeCharacter(at: position)) after a value", at: position, kind: .unexpectedCharacterAfterValue)
 	}
 
 	/**
@@ -1610,47 +1786,56 @@ struct Parser {
 
 		let token = bytes[start..<position]
 
-		if token.hasASCIIPattern("0000-00-00") {
-			// A date, a space, and a time are an invalid instant, rather than two date values.
+		var diagnosticKind = SOML.ParseError.Kind.invalidNumber
+		do {
+			if token.hasASCIIPattern("0000-00-00") {
+				diagnosticKind = .invalidDate
+				// A date, a space, and a time are an invalid instant, rather than two date values.
+				if
+					byte(at: position) == .space,
+					bytes.dropFirst(position + 1).prefix(5).hasASCIIPattern("00:00")
+				{
+					diagnosticKind = .invalidInstant
+					throw error(badInstantMessage(token), at: start)
+				}
+
+				do {
+					return .date(try SOML.Date.parse(token))
+				} catch {
+					// The reason is always given, because the token has the form of a date.
+					throw self.error("Invalid date \(String(decoding: token, as: UTF8.self)): \(error.reason ?? "a date is written as YYYY-MM-DD")", at: start)
+				}
+			}
+
+			if token.prefix(10).hasASCIIPattern("0000-00-00") {
+				diagnosticKind = .invalidInstant
+				return .instant(try parseInstant(token))
+			}
+
+			let kind = Self.numberKind(token)
+
 			if
-				byte(at: position) == .space,
-				bytes.dropFirst(position + 1).prefix(5).hasASCIIPattern("00:00")
+				kind == nil,
+				Self.isDurationLike(token)
 			{
-				throw error(badInstantMessage(token), at: start)
+				diagnosticKind = .invalidDuration
+				return .duration(.nanoseconds(try parseDuration(token)))
 			}
 
-			do {
-				return .date(try SOML.Date.parse(token))
-			} catch {
-				// The reason is always given, because the token has the form of a date.
-				throw self.error("Invalid date \(String(decoding: token, as: UTF8.self)): \(error.reason ?? "a date is written as YYYY-MM-DD")", at: start)
+			switch kind {
+			case .int:
+				return .int(try parseInteger(token))
+			case .float:
+				return .float(try parseFloat(token))
+			case nil:
+				if let message = thousandsSeparatorMessage(token) {
+					throw error(message, at: start)
+				}
+
+				throw error(badNumberMessage(token), at: start)
 			}
-		}
-
-		if token.prefix(10).hasASCIIPattern("0000-00-00") {
-			return .instant(try parseInstant(token))
-		}
-
-		let kind = Self.numberKind(token)
-
-		if
-			kind == nil,
-			Self.isDurationLike(token)
-		{
-			return .duration(.nanoseconds(try parseDuration(token)))
-		}
-
-		switch kind {
-		case .int:
-			return .int(try parseInteger(token))
-		case .float:
-			return .float(try parseFloat(token))
-		case nil:
-			if let message = thousandsSeparatorMessage(token) {
-				throw error(message, at: start)
-			}
-
-			throw error(badNumberMessage(token), at: start)
+		} catch let error as SOML.ParseError {
+			throw error.annotating(kind: diagnosticKind, sourceRange: token.indices, in: bytes)
 		}
 	}
 
@@ -2856,11 +3041,21 @@ struct Parser {
 	}
 
 	private mutating func parseString() throws -> String {
-		guard quoteRunLength(at: position) < 3 else {
-			return try parseBlockString()
-		}
+		let start = position
+		do {
+			guard quoteRunLength(at: position) < 3 else {
+				return try parseBlockString()
+			}
 
-		return try parseSingleLineString()
+			return try parseSingleLineString()
+		} catch let error as SOML.ParseError {
+			// An unknown escape can consume only the first byte of a Unicode scalar. Its diagnostic still ends at a complete scalar boundary.
+			var end = position
+			while end < bytes.count, bytes[end] & 0xC0 == 0x80 {
+				end += 1
+			}
+			throw error.annotating(kind: .invalidString, sourceRange: start..<end, in: bytes)
+		}
 	}
 
 	/**
@@ -3033,7 +3228,7 @@ struct Parser {
 			rest.count >= 5,
 			rest.dropFirst().prefix(4).allSatisfy(\.isHexadecimalDigit)
 		{
-			return Diagnosis(fourDigitEscapeMessage(rest))
+			return fourDigitEscapeMessage(rest)
 		}
 
 		guard rest.starts(with: [.lowercaseU, .openBrace]) else {
@@ -3061,9 +3256,9 @@ struct Parser {
 	}
 
 	/**
-	The message for the JSON form `\uXXXX`, from its `u`, with the escape to write instead. JSON writes a character above U+FFFF as two of them, a surrogate pair, which is one `\u{…}` escape here. Here, a lone surrogate and a carriage return have no escape.
+	The message and fix-it for the JSON form `\uXXXX`, from its `u`, with the escape to write instead. JSON writes a character above U+FFFF as two of them, a surrogate pair, which is one `\u{…}` escape here. Here, a lone surrogate and a carriage return have no escape.
 	*/
-	private func fourDigitEscapeMessage(_ rest: ArraySlice<UInt8>) -> String {
+	private func fourDigitEscapeMessage(_ rest: ArraySlice<UInt8>) -> Diagnosis {
 		let escape = String(decoding: rest.prefix(5), as: UTF8.self)
 		let code = UInt32(String(decoding: rest.dropFirst().prefix(4), as: UTF8.self), radix: 16)!
 		// A second `\uXXXX` directly after it.
@@ -3078,7 +3273,9 @@ struct Parser {
 			(0xDC00...0xDFFF).contains(low)
 		{
 			let scalar = 0x10000 + (code - 0xD800) * 0x400 + (low - 0xDC00)
-			return #"The four-digit \\#(escape)\u\#(String(decoding: lowDigits, as: UTF8.self)) form is not an escape. Write \u{\#(String(scalar, radix: 16))}"#
+			let replacement = #"\u{\#(String(scalar, radix: 16))}"#
+			let message = #"The four-digit \\#(escape)\u\#(String(decoding: lowDigits, as: UTF8.self)) form is not an escape. Write \#(replacement)"#
+			return Diagnosis(message, fixing: (rest.startIndex - 1)..<(second.startIndex + 6), with: replacement)
 		}
 
 		let form = #"The four-digit \\#(escape) form is not an escape"#
@@ -3091,7 +3288,8 @@ struct Parser {
 			return "\(form), and a carriage return (U+000D) cannot be represented"
 		}
 
-		return #"\#(form). Write \u{\#(String(code, radix: 16))}"#
+		let replacement = #"\u{\#(String(code, radix: 16))}"#
+		return Diagnosis(#"\#(form). Write \#(replacement)"#, fixing: (rest.startIndex - 1)..<(rest.startIndex + 5), with: replacement)
 	}
 
 	/**
@@ -3318,8 +3516,21 @@ struct Parser {
 		return key.isBareSOMLKey ? shortened : shortened.jsonQuoted
 	}
 
-	private func error(_ message: String, at offset: Int, fixIt: SOML.ParseError.FixIt? = nil) -> SOML.ParseError {
-		SOML.ParseError(message: message, offset: offset, in: bytes, fixIt: fixIt)
+	private func error(
+		_ message: String,
+		at offset: Int,
+		fixIt: SOML.ParseError.FixIt? = nil,
+		kind: SOML.ParseError.Kind = .other,
+		sourceRange: Range<Int>? = nil
+	) -> SOML.ParseError {
+		SOML.ParseError(
+			message: message,
+			offset: offset,
+			in: bytes,
+			fixIt: fixIt,
+			kind: kind,
+			sourceRange: sourceRange ?? (offset == bytes.count ? offset..<offset : nil)
+		)
 	}
 
 	private func error(_ diagnosis: Diagnosis, at offset: Int) -> SOML.ParseError {

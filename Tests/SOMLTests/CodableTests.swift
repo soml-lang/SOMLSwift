@@ -160,7 +160,14 @@ struct DecoderTests {
 
 		#expect(type is Int.Type)
 		#expect(context.codingPath.first?.intValue == 0)
-		#expect(context.debugDescription == "Expected an int for Int, but found a string. An int is written without quotes, like 1 (line 1, column 2)")
+		#expect(context.debugDescription == "Expected an int, but found a string. An int is written without quotes, like 1 (line 1, column 2)")
+	}
+
+	@Test
+	func `a quoted date gets the date without quotes as a hint`() throws {
+		let error = try #require(decodingError([SOML.Date].self, from: "['2019-07-13']"))
+		#expect("\(error)".contains("Expected a date, but found the string '2019-07-13'. A date is written without quotes, like 2019-07-13 (line 1, column 2)"))
+		#expect(!"\(try #require(decodingError([SOML.Date].self, from: "['July']")))".contains("without quotes"))
 	}
 
 	@Test
@@ -176,11 +183,11 @@ struct DecoderTests {
 			return context.debugDescription
 		}
 
-		#expect(try message("'6,000,000'").hasPrefix("Expected an int for Int, but found the string '6,000,000'. An int is written without quotes, like 6000000"))
-		#expect(try message("'12,345'").hasPrefix("Expected an int for Int, but found the string '12,345'. An int is written without quotes, like 12345"))
-		#expect(try message("'-1,234'").hasPrefix("Expected an int for Int, but found the string '-1,234'. An int is written without quotes, like -1234"))
-		#expect(try message("'42'").hasPrefix("Expected an int for Int, but found the string '42'. An int is written without quotes, like 42"))
-		#expect(try message("'1_000'").hasPrefix("Expected an int for Int, but found the string '1_000'. An int is written without quotes, like 1000"))
+		#expect(try message("'6,000,000'").hasPrefix("Expected an int, but found the string '6,000,000'. An int is written without quotes, like 6000000"))
+		#expect(try message("'12,345'").hasPrefix("Expected an int, but found the string '12,345'. An int is written without quotes, like 12345"))
+		#expect(try message("'-1,234'").hasPrefix("Expected an int, but found the string '-1,234'. An int is written without quotes, like -1234"))
+		#expect(try message("'42'").hasPrefix("Expected an int, but found the string '42'. An int is written without quotes, like 42"))
+		#expect(try message("'1_000'").hasPrefix("Expected an int, but found the string '1_000'. An int is written without quotes, like 1000"))
 		#expect(try !message("'many'").contains("without quotes"))
 		#expect(try !message("'1.5'").contains("without quotes"))
 
@@ -209,10 +216,10 @@ struct DecoderTests {
 	}
 
 	@Test(arguments: [
-		("endpoint: 'db'\nports: [1]", "Expected an object for Endpoint, but found the string 'db' (line 1, column 1)", ["endpoint"]),
-		("endpoint: {host: 'a'}\nports: {http: 80}", "Expected an array for Array<Int>, but found an object (line 2, column 1)", ["ports"]),
-		("endpoint: {host: 'a'}\nports: []\nbackup: 5", "Expected an object for Endpoint, but found the int 5 (line 3, column 1)", ["backup"]),
-		("[1]", "Expected an object for Deployment, but found an array (line 1, column 1)", []),
+		("endpoint: 'db'\nports: [1]", "Expected an object, but found the string 'db' (line 1, column 1)", ["endpoint"]),
+		("endpoint: {host: 'a'}\nports: {http: 80}", "Expected an array, but found an object (line 2, column 1)", ["ports"]),
+		("endpoint: {host: 'a'}\nports: []\nbackup: 5", "Expected an object, but found the int 5 (line 3, column 1)", ["backup"]),
+		("[1]", "Expected an object, but found an array (line 1, column 1)", []),
 	])
 	func `a mismatch for an object or an array names the type that reads it`(source: String, message: String, path: [String]) throws {
 		let error = try #require(decodingError(Deployment.self, from: source))
@@ -277,14 +284,14 @@ struct DecoderTests {
 		}
 
 		let cases = [
-			("id: 1", "Expected a string for UUID, but found the int 1 (line 1, column 1)"),
-			("color: 1", "Expected a string for Color, but found the int 1 (line 1, column 1)"),
-			("port: 'a'", "Expected an int for Port, but found the string 'a' (line 1, column 1)"),
-			("colors: [true]", "Expected a string for Color, but found the bool true (line 1, column 10)"),
+			("id: 1", "Expected a string, but found the int 1 (line 1, column 1)"),
+			("color: 1", "Expected a string, but found the int 1 (line 1, column 1)"),
+			("port: 'a'", "Expected an int, but found the string 'a' (line 1, column 1)"),
+			("colors: [true]", "Expected a string, but found the bool true (line 1, column 10)"),
 			// An `Optional` decodes the type it wraps, which is the one named.
-			("optionalPorts: ['a']", "Expected an int for Int, but found the string 'a' (line 1, column 17)"),
-			("optionalURLs: [1]", "Expected a string for URL, but found the int 1 (line 1, column 16)"),
-			("optionalColors: {a: 1}", "Expected a string for Color, but found the int 1 (line 1, column 18)"),
+			("optionalPorts: ['a']", "Expected an int, but found the string 'a' (line 1, column 17)"),
+			("optionalURLs: [1]", "Expected a string, but found the int 1 (line 1, column 16)"),
+			("optionalColors: {a: 1}", "Expected a string, but found the int 1 (line 1, column 18)"),
 			("port: null", nil),
 		]
 
@@ -331,7 +338,7 @@ struct DecoderTests {
 				continue
 			}
 
-			#expect(context.debugDescription == "Expected an object for Dictionary<String, Int>, but found the int 5 (line 1, column 1)")
+			#expect(context.debugDescription == "Expected an object, but found the int 5 (line 1, column 1)")
 		}
 	}
 
@@ -385,7 +392,7 @@ struct DecoderTests {
 			return
 		}
 
-		#expect(context.debugDescription.hasPrefix("Expected an int for Int, but found"))
+		#expect(context.debugDescription.hasPrefix("Expected an int, but found"))
 	}
 
 	@Test(arguments: ["1e300", "9.3e18", "-9.3e18", "9223372036854775808.0", "1.5", "-0.5"])
@@ -396,7 +403,7 @@ struct DecoderTests {
 			return
 		}
 
-		#expect(context.debugDescription.hasPrefix("Expected an int for Int, but found the float "))
+		#expect(context.debugDescription.hasPrefix("Expected an int, but found the float "))
 		#expect(!context.debugDescription.contains("without a fraction"), "Message was: \(context.debugDescription)")
 	}
 
@@ -426,13 +433,13 @@ struct DecoderTests {
 			return context.debugDescription
 		}
 
-		#expect(try message(UInt8.self, "300.0") == "Expected an int for UInt8, but found the float 300.0 (line 1, column 2)")
-		#expect(try message(UInt.self, "-1.0") == "Expected an int for UInt, but found the float -1.0 (line 1, column 2)")
-		#expect(try message(Int8.self, "-129.0") == "Expected an int for Int8, but found the float -129.0 (line 1, column 2)")
+		#expect(try message(UInt8.self, "300.0") == "Expected an int, but found the float 300.0 (line 1, column 2)")
+		#expect(try message(UInt.self, "-1.0") == "Expected an int, but found the float -1.0 (line 1, column 2)")
+		#expect(try message(Int8.self, "-129.0") == "Expected an int, but found the float -129.0 (line 1, column 2)")
 
 		// At the ends of the range, the int of the hint decodes.
-		#expect(try message(UInt8.self, "255.0") == "Expected an int for UInt8, but found the float 255.0. An int is written without a fraction, like 255 (line 1, column 2)")
-		#expect(try message(Int8.self, "-128.0") == "Expected an int for Int8, but found the float -128.0. An int is written without a fraction, like -128 (line 1, column 2)")
+		#expect(try message(UInt8.self, "255.0") == "Expected an int, but found the float 255.0. An int is written without a fraction, like 255 (line 1, column 2)")
+		#expect(try message(Int8.self, "-128.0") == "Expected an int, but found the float -128.0. An int is written without a fraction, like -128 (line 1, column 2)")
 		#expect(try SOML.Decoder().decode([UInt8].self, from: "[255]") == [255])
 		#expect(try SOML.Decoder().decode([Int8].self, from: "[-128]") == [-128])
 	}
@@ -622,7 +629,7 @@ struct DecoderTests {
 			}
 		}
 
-		// The same, except that the type that is named is the one that is decoded.
+		// The same errors, as the messages do not name the decoded type.
 		for (text, found) in [("a: [1]", "an array"), ("a: null", "null"), ("a: 1", "the int 1")] {
 			let direct = try #require(throws: DecodingError.self) {
 				try SOML.Decoder().decode([String: Direct].self, from: text)
@@ -632,9 +639,9 @@ struct DecoderTests {
 				try SOML.Decoder().decode([String: SOML.Object].self, from: text)
 			}
 
-			#expect(String(describing: direct) == String(describing: throughContainer).replacing("for Object", with: "for Direct"))
-			#expect("\(direct)".contains("Expected an object for Direct, but found \(found)"), "\(direct)")
-			#expect("\(throughContainer)".contains("Expected an object for Object, but found \(found)"), "\(throughContainer)")
+			#expect(String(describing: direct) == String(describing: throughContainer))
+			#expect("\(direct)".contains("Expected an object, but found \(found)"), "\(direct)")
+			#expect("\(throughContainer)".contains("Expected an object, but found \(found)"), "\(throughContainer)")
 		}
 	}
 

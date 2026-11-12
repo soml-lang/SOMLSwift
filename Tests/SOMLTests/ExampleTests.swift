@@ -535,7 +535,7 @@ struct CodeExampleTests {
 				return false
 			}
 
-			return context.debugDescription == "Expected an int for Int, but found the string 'eighty' (line 3, column 1)"
+			return context.debugDescription == "Expected an int, but found the string 'eighty' (line 3, column 1)"
 		}
 
 		#expect {

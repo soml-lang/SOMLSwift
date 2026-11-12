@@ -104,7 +104,7 @@ extension SOML {
 		/**
 		Whether a member that the type does not read is an error. The default is `false`, which ignores such members, as `JSONDecoder` does.
 
-		Turn it on to report a misspelled key in a config file, which would otherwise be ignored silently. The error is a `DecodingError.dataCorrupted` whose coding path ends at the unknown key, and it suggests a key the type looked for when one is close.
+		Turn it on to report a misspelled key in a config file, which would otherwise be ignored silently. The error is a `DecodingError.dataCorrupted` whose coding path ends at the unknown key, and it suggests a key the type looked for when one is close. Its `underlyingError` is a `SOML.Decoder.UnknownKeyError` with the key and the suggestion, for code that writes its own message.
 
 		A type that reads `allKeys`, like `[String: T]` or an enum with associated values, decides about the keys itself, so its object is not checked. The objects inside it are. The same holds for an object decoded whole as `SOML.Value` or `SOML.Object`, also when another type reads the same object, like a struct that keeps the members it does not know in a `[String: SOML.Value]`. So a type that only looks at the whole object, and then decodes it as a stricter type, turns off the check for that object. Look at a member through a nested container instead.
 
@@ -697,6 +697,14 @@ final class DecoderImplementation: Decoder {
 	*/
 	func unboxDate(_ value: SOML.Value, key: (any CodingKey)?) throws(DecodingError) -> SOML.Date {
 		guard case .date(let date) = value else {
+			// A quoted date, like '2019-07-13', gets the date that it means.
+			if
+				case .string(let string) = value,
+				case .date(let date)? = try? SOML.Value(parsingValue: string)
+			{
+				throw DecodingError.typeMismatch(SOML.Date.self, .init(codingPath: codingPath(appending: key), debugDescription: "Expected a date, but found \(value.briefDescription). A date is written without quotes, like \(SOML.Value.date(date))"))
+			}
+
 			throw mismatch(SOML.Date.self, value, key: key, expected: "a date")
 		}
 
@@ -735,7 +743,7 @@ final class DecoderImplementation: Decoder {
 				let exact = Int64(exactly: float),
 				T(exactly: exact) != nil
 			{
-				throw DecodingError.typeMismatch(type, .init(codingPath: codingPath(appending: key), debugDescription: "Expected an int for \(type), but found the float \(value). An int is written without a fraction, like \(exact)"))
+				throw DecodingError.typeMismatch(type, .init(codingPath: codingPath(appending: key), debugDescription: "Expected an int, but found the float \(value). An int is written without a fraction, like \(exact)"))
 			}
 
 			// A quoted number, like '6,000,000', gets the int that it means, if an int of the type can hold it.
@@ -745,7 +753,7 @@ final class DecoderImplementation: Decoder {
 				case .int(let int)? = try? SOML.Value(parsingValue: text),
 				T(exactly: int) != nil
 			{
-				throw DecodingError.typeMismatch(type, .init(codingPath: codingPath(appending: key), debugDescription: "Expected an int for \(type), but found \(value.briefDescription). An int is written without quotes, like \(int)"))
+				throw DecodingError.typeMismatch(type, .init(codingPath: codingPath(appending: key), debugDescription: "Expected an int, but found \(value.briefDescription). An int is written without quotes, like \(int)"))
 			}
 
 			throw mismatch(type, value, key: key, expected: "an int")
@@ -822,15 +830,13 @@ final class DecoderImplementation: Decoder {
 	func mismatch(_ type: Any.Type?, _ value: SOML.Value, key: (any CodingKey)?, expected: String, unknownType: Any.Type = Any.self) -> DecodingError {
 		let codingPath = codingPath(appending: key)
 		let errorType = type ?? unknownType
-		// The value of the decoder itself is for the decoder's type, like a UUID that decodes a string through a single value container, except for an `Optional`, which decodes the type it wraps. A nested container has no type, and the type of the error is not one that the user wrote, so then no type is named.
-		let namedType = key == nil && !(self.type is any OptionalDecodable.Type) ? self.type ?? type : type
-		let expectation = namedType.map { "\(expected) for \($0)" } ?? expected
 
+		// The message does not name the Swift type, which the writer of the document does not know. The error has the type.
 		if case .null = value {
-			return DecodingError.valueNotFound(errorType, .init(codingPath: codingPath, debugDescription: "Expected \(expectation), but found null"))
+			return DecodingError.valueNotFound(errorType, .init(codingPath: codingPath, debugDescription: "Expected \(expected), but found null"))
 		}
 
-		return DecodingError.typeMismatch(errorType, .init(codingPath: codingPath, debugDescription: "Expected \(expectation), but found \(value.briefDescription)"))
+		return DecodingError.typeMismatch(errorType, .init(codingPath: codingPath, debugDescription: "Expected \(expected), but found \(value.briefDescription)"))
 	}
 }
 
@@ -1484,7 +1490,7 @@ final class ReadKeys {
 			let codingPath = reads.codingPath.keys
 
 			// A misspelling is likely one of the keys the type looked for that the document does not have. With defaults, the decoded object has every key, so look in the document.
-			let suggestion: String
+			var suggestion: SOML.Decoder.UnknownKeyError.Suggestion?
 			if unknownKey.unicodeScalars.prefix(65).count <= 64 {
 				let documentObject = document.value(at: codingPath, keySeparator: keySeparator)?.objectValue ?? object
 				// The suggestion is not shortened, as it is what to write, and `closest(in:)` only suggests a key for a short one.
@@ -1492,14 +1498,28 @@ final class ReadKeys {
 
 				// Keys are compared by their Unicode scalars, so a key in another Unicode normalization is another key, though it looks the same, as for a missing key.
 				if let equivalent = candidates.first(where: { $0.isEquivalentKey(to: unknownKey) }) {
-					suggestion = ". \(type) reads \(SOML.KeyPath.Segment.key(equivalent).described), which looks the same, but is written with other Unicode scalars, so it is another key"
+					suggestion = .otherUnicodeScalars(equivalent)
 				} else {
-					suggestion = unknownKey.closest(in: candidates).map { ". Did you mean \(CanonicalWriter.key($0).sanitizedForTerminal)?" } ?? ""
+					suggestion = unknownKey.closest(in: candidates).map { .closest($0) }
 				}
-			} else {
-				suggestion = ""
 			}
-			throw DecodingError.dataCorrupted(.init(codingPath: codingPath + [SOMLCodingKey(stringValue: unknownKey)], debugDescription: "Unknown key \(SOML.KeyPath.Segment.key(unknownKey).described), which \(type) does not read\(suggestion)"))
+
+			let suggestionText = switch suggestion {
+			case .otherUnicodeScalars(let equivalent):
+				". \(type) reads \(SOML.KeyPath.Segment.key(equivalent).described), which looks the same, but is written with other Unicode scalars, so it is another key"
+			case .closest(let closest):
+				". Did you mean \(CanonicalWriter.key(closest).sanitizedForTerminal)?"
+			case nil:
+				""
+			}
+
+			throw DecodingError.dataCorrupted(
+				.init(
+					codingPath: codingPath + [SOMLCodingKey(stringValue: unknownKey)],
+					debugDescription: "Unknown key \(SOML.KeyPath.Segment.key(unknownKey).described), which \(type) does not read\(suggestionText)",
+					underlyingError: SOML.Decoder.UnknownKeyError(key: unknownKey, suggestion: suggestion)
+				)
+			)
 		}
 	}
 }
@@ -1737,5 +1757,51 @@ extension [Unicode.Scalar] {
 		}
 
 		return previousRow[other.count]
+	}
+}
+
+extension SOML.Decoder {
+	/**
+	The `underlyingError` of the `DecodingError` for a member that the type does not read, when `rejectsUnknownKeys` is on, for code that writes its own message, like without the name of the Swift type.
+
+	```swift
+	do {
+		try decoder.decode(Options.self, from: "timout: 30.0")
+	} catch let DecodingError.dataCorrupted(context) {
+		if
+			let error = context.underlyingError as? SOML.Decoder.UnknownKeyError,
+			case .closest(let key) = error.suggestion
+		{
+			print("Unknown key \(error.key). Did you mean \(key)?")
+			//=> Unknown key timout. Did you mean timeout?
+		}
+	}
+	```
+	*/
+	public struct UnknownKeyError: Error, Sendable, Hashable {
+		/**
+		A key that the type reads instead of the unknown key.
+		*/
+		public enum Suggestion: Sendable, Hashable {
+			/**
+			A key that is close to the unknown key, like `timeout` for `timout`, so the unknown key is likely a misspelling of it.
+			*/
+			case closest(String)
+
+			/**
+			A key that looks the same as the unknown key, but is written with other Unicode scalars, like `é` as one scalar or as `e` and an accent, so it is another key.
+			*/
+			case otherUnicodeScalars(String)
+		}
+
+		/**
+		The unknown key, as the document means it, without quotes or escapes.
+		*/
+		public let key: String
+
+		/**
+		The key that the type reads instead, or `nil` when no key is close.
+		*/
+		public let suggestion: Suggestion?
 	}
 }

@@ -465,6 +465,8 @@ comments?.trailing
 
 #### Source ranges
 
+`Document.expectsValue(atOffset:in:)` and `Document.expectsKey(atOffset:in:)` recognize empty value or member positions with the ordinary grammar, including incomplete source. They exclude strings, comments, existing tokens, and uncertain prefixes, so editor suggestions do not have to guess syntax.
+
 `range(of:)` gives where a member or an array item is written, from the start of its key to the end of its value, and `valueRange(of:)` gives where its value is written. `path(atOffset:)` gives the deepest member or item at a byte offset, like the caret in an editor:
 
 ```swift
@@ -538,7 +540,7 @@ print(text)
 
 ### Location of a decoding error
 
-When `SOML.Decoder` decodes text, a `DecodingError` about a value ends with where that value is, like `Expected an int for Int, but found the string 'eighty' (line 3, column 1)`.
+When `SOML.Decoder` decodes text, a `DecodingError` about a value ends with where that value is, like `Expected an int, but found the string 'eighty' (line 3, column 1)`.
 
 For the location as a value, parse the text as a `SOML.Document`, decode its `value`, and ask the document where the coding path is:
 

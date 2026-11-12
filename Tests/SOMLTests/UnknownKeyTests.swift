@@ -55,6 +55,12 @@ struct UnknownKeyTests {
 		let context = try errorContext(Config.self, "name: 'api'\nreplicas: 3\ntimout: 1.5")
 		#expect(context.debugDescription == "Unknown key timout, which Config does not read. Did you mean timeout? (line 3, column 1)")
 		#expect(context.codingPath.map(\.stringValue) == ["timout"])
+		#expect(context.underlyingError as? SOML.Decoder.UnknownKeyError == SOML.Decoder.UnknownKeyError(key: "timout", suggestion: .closest("timeout")))
+	}
+
+	@Test
+	func `the error of an unknown key has the key and the suggestion as values`() throws {
+		#expect(try errorContext(Config.self, "name: 'api'\nreplicas: 3\nzzz: 1").underlyingError as? SOML.Decoder.UnknownKeyError == SOML.Decoder.UnknownKeyError(key: "zzz", suggestion: nil))
 	}
 
 	@Test
@@ -653,6 +659,7 @@ struct UnknownKeyTests {
 		}
 
 		#expect(context.debugDescription == "Unknown key \"café\", which Drink does not read. Drink reads \"café\", which looks the same, but is written with other Unicode scalars, so it is another key (line 1, column 1)")
+		#expect(context.underlyingError as? SOML.Decoder.UnknownKeyError == SOML.Decoder.UnknownKeyError(key: "cafe\u{301}", suggestion: .otherUnicodeScalars("caf\u{E9}")))
 	}
 
 	/**

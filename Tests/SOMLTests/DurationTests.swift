@@ -381,7 +381,7 @@ struct DurationCodingTests {
 			_ = try SOML.Decoder().decode(Config.self, from: "timeout: 30")
 			Issue.record("Expected an error")
 		} catch DecodingError.typeMismatch(_, let context) {
-			#expect(context.debugDescription == "Expected a duration for Duration, but found the int 30 (line 1, column 1)")
+			#expect(context.debugDescription == "Expected a duration, but found the int 30 (line 1, column 1)")
 		}
 	}
 

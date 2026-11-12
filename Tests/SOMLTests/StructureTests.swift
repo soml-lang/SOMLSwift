@@ -113,6 +113,14 @@ struct DocumentTests {
 	}
 
 	@Test
+	func `a parse error has the kind of a duplicate key and of a character after a value`() {
+		#expect(parseError("a: 1\n'a': 2")?.kind == .duplicateKey("a"))
+		#expect(parseError("\"a.b\": 1\n\"a.b\": 2")?.kind == .duplicateKey("a.b"))
+		#expect(parseError("a: 'Sindre's app'")?.kind == .unexpectedCharacterAfterValue)
+		#expect(parseError("a: [")?.kind == .other)
+	}
+
+	@Test
 	func `what follows a value is checked before its key is, as in the reference implementation`() {
 		#expect(parseError("a: 1\na: 2[")?.location.description == "line 2, column 5")
 		#expect(parseError("a: 1\na: 2{")?.description == "Unexpected “{” after a value (line 2, column 5)")
